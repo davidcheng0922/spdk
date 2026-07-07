@@ -3970,7 +3970,7 @@ super_block_crc(void)
  *   verify the third blob, it should correct.
  */
 static void
-blob_dirty_shutdown(void)
+blob_dirty_shutdown_common(uint32_t recovery_qd)
 {
 	int rc;
 	int index;
@@ -3984,6 +3984,10 @@ blob_dirty_shutdown(void)
 	uint32_t page_num;
 	struct spdk_blob_md_page *page;
 	struct spdk_blob_opts blob_opts;
+	struct spdk_bs_opts bs_opts;
+
+	spdk_bs_opts_init(&bs_opts, sizeof(bs_opts));
+	bs_opts.recovery_qd = recovery_qd;
 
 	/* Create first blob */
 	blobid1 = spdk_blob_get_id(blob);
@@ -4028,7 +4032,7 @@ blob_dirty_shutdown(void)
 	g_blob = NULL;
 	g_blobid = SPDK_BLOBID_INVALID;
 
-	ut_bs_dirty_load(&bs, NULL);
+	ut_bs_dirty_load(&bs, &bs_opts);
 
 	/* Get the super blob */
 	spdk_bs_get_super(bs, blob_op_with_id_complete, NULL);
@@ -4067,7 +4071,7 @@ blob_dirty_shutdown(void)
 	g_blob = NULL;
 	g_blobid = SPDK_BLOBID_INVALID;
 
-	ut_bs_dirty_load(&bs, NULL);
+	ut_bs_dirty_load(&bs, &bs_opts);
 
 	spdk_bs_open_blob(bs, blobid1, blob_op_with_handle_complete, NULL);
 	poll_threads();
@@ -4110,7 +4114,7 @@ blob_dirty_shutdown(void)
 	g_blob = NULL;
 	g_blobid = SPDK_BLOBID_INVALID;
 
-	ut_bs_dirty_load(&bs, NULL);
+	ut_bs_dirty_load(&bs, &bs_opts);
 
 	spdk_bs_open_blob(bs, blobid2, blob_op_with_handle_complete, NULL);
 	poll_threads();
@@ -4132,7 +4136,7 @@ blob_dirty_shutdown(void)
 
 	free_clusters = spdk_bs_free_cluster_count(bs);
 
-	ut_bs_dirty_load(&bs, NULL);
+	ut_bs_dirty_load(&bs, &bs_opts);
 
 	spdk_bs_open_blob(bs, blobid2, blob_op_with_handle_complete, NULL);
 	poll_threads();
@@ -4218,7 +4222,7 @@ blob_dirty_shutdown(void)
 
 	free_clusters = spdk_bs_free_cluster_count(bs);
 
-	ut_bs_dirty_load(&bs, NULL);
+	ut_bs_dirty_load(&bs, &bs_opts);
 
 	spdk_bs_open_blob(bs, blobid2, blob_op_with_handle_complete, NULL);
 	poll_threads();
@@ -4232,6 +4236,18 @@ blob_dirty_shutdown(void)
 	blob = g_blob;
 
 	CU_ASSERT(free_clusters == spdk_bs_free_cluster_count(bs));
+}
+
+static void
+blob_dirty_shutdown(void)
+{
+	blob_dirty_shutdown_common(1);
+}
+
+static void
+blob_dirty_shutdown_batched_recovery(void)
+{
+	blob_dirty_shutdown_common(8);
 }
 
 static void
@@ -11226,6 +11242,7 @@ main(int argc, char **argv)
 		CU_ADD_TEST(suite_bs, blob_crc);
 		CU_ADD_TEST(suite, super_block_crc);
 		CU_ADD_TEST(suite_blob, blob_dirty_shutdown);
+		CU_ADD_TEST(suite_blob, blob_dirty_shutdown_batched_recovery);
 		CU_ADD_TEST(suite_bs, blob_flags);
 		CU_ADD_TEST(suite_bs, bs_version);
 		CU_ADD_TEST(suite_bs, blob_set_xattrs_test);
