@@ -4692,12 +4692,25 @@ bs_load_read_used_pages(struct spdk_bs_load_ctx *ctx)
 			     bs_load_used_pages_cpl, ctx);
 }
 
+#ifdef SPDK_UNIT_TEST
+static uint32_t g_bs_recovery_parse_page_fail_after;
+static int g_bs_recovery_parse_page_fail_rc = -EINVAL;
+static uint32_t g_bs_recovery_batched_fallback_count;
+#endif
+
 static int
 bs_load_replay_md_parse_page(struct spdk_bs_load_ctx *ctx, struct spdk_blob_md_page *page)
 {
 	struct spdk_blob_store *bs = ctx->bs;
 	struct spdk_blob_md_descriptor *desc;
 	size_t	cur_desc = 0;
+
+#ifdef SPDK_UNIT_TEST
+	if (g_bs_recovery_parse_page_fail_after != 0 &&
+	    --g_bs_recovery_parse_page_fail_after == 0) {
+		return g_bs_recovery_parse_page_fail_rc;
+	}
+#endif
 
 	desc = (struct spdk_blob_md_descriptor *)page->descriptors;
 	while (cur_desc < sizeof(page->descriptors)) {
@@ -5244,6 +5257,12 @@ bs_recovery_pages_size_valid(uint64_t page_count, uint32_t md_page_size)
 }
 
 static bool
+bs_recovery_array_size_valid(uint32_t count, size_t elem_size)
+{
+	return elem_size != 0 && count <= SIZE_MAX / elem_size;
+}
+
+static bool
 bs_recovery_root_page_valid(struct spdk_blob_md_page *page, uint32_t page_num)
 {
 	uint32_t crc;
@@ -5307,7 +5326,7 @@ bs_recovery_add_root(struct bs_recovery_batched_ctx *bctx, uint32_t root_page)
 		}
 		new_cap = bctx->root_cap == 0 ? BS_RECOVERY_ROOT_PAGES_INITIAL_CAP :
 			  bctx->root_cap * 2;
-		if (new_cap > SIZE_MAX / sizeof(*bctx->root_pages)) {
+		if (!bs_recovery_array_size_valid(new_cap, sizeof(*bctx->root_pages))) {
 			return -ENOMEM;
 		}
 
@@ -5338,8 +5357,8 @@ bs_recovery_chain_append_page(struct bs_recovery_chain *chain, struct spdk_blob_
 		}
 		new_cap = chain->page_cap == 0 ? BS_RECOVERY_CHAIN_PAGES_INITIAL_CAP :
 			  chain->page_cap * 2;
-		if (new_cap > SIZE_MAX / sizeof(*chain->page_nums) ||
-		    new_cap > SIZE_MAX / sizeof(*chain->pages)) {
+		if (!bs_recovery_array_size_valid(new_cap, sizeof(*chain->page_nums)) ||
+		    !bs_recovery_array_size_valid(new_cap, sizeof(*chain->pages))) {
 			return -ENOMEM;
 		}
 
@@ -5377,6 +5396,10 @@ bs_recovery_batched_fallback(struct bs_recovery_batched_ctx *bctx, const char *r
 	struct spdk_bs_load_ctx *ctx = bctx->load_ctx;
 
 	SPDK_WARNLOG("Falling back to serial blobstore recovery: %s\n", reason);
+
+#ifdef SPDK_UNIT_TEST
+	g_bs_recovery_batched_fallback_count++;
+#endif
 
 	/* Batched recovery may have partially populated masks. Reset them before serial replay. */
 	spdk_bit_array_clear_mask(ctx->bs->used_md_pages);
@@ -5627,7 +5650,7 @@ bs_recovery_chain_append_page_num(struct bs_recovery_chain *chain, uint32_t page
 		}
 		new_cap = chain->page_cap == 0 ? BS_RECOVERY_CHAIN_PAGES_INITIAL_CAP :
 			  chain->page_cap * 2;
-		if (new_cap > SIZE_MAX / sizeof(*chain->page_nums)) {
+		if (!bs_recovery_array_size_valid(new_cap, sizeof(*chain->page_nums))) {
 			return -ENOMEM;
 		}
 
