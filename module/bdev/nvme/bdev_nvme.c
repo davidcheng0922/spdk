@@ -6359,7 +6359,6 @@ nvme_ctrlr_create(struct spdk_nvme_ctrlr *ctrlr,
 		spdk_bdev_nvme_get_default_ctrlr_opts(&nvme_ctrlr->opts);
 	}
 
-	period = spdk_interrupt_mode_is_enabled() ? 0 : g_opts.nvme_adminq_poll_period_us;
 	/*
 	 * In interrupt mode, NVMe/TCP still requires periodic polling of the admin queue
 	 * for Keep Alive and disconnect handling: TCP provides no hardware interrupt for
@@ -6373,9 +6372,13 @@ nvme_ctrlr_create(struct spdk_nvme_ctrlr *ctrlr,
 	 * bdev_nvme_change_adminq_poll_period(), which accelerates the TCP adminq for
 	 * the duration of a disconnect or reset.
 	 */
-	period = (spdk_interrupt_mode_is_enabled() &&
-		  (nvme_ctrlr->active_path_id->trid.trtype != SPDK_NVME_TRANSPORT_TCP)) ? period :
-		 g_opts.nvme_adminq_poll_period_us;
+	if (!spdk_interrupt_mode_is_enabled()) {
+		period = 100;
+	} else if (nvme_ctrlr->active_path_id->trid.trtype == SPDK_NVME_TRANSPORT_TCP) {
+		period = g_opts.nvme_adminq_poll_period_us;
+	} else {
+		period = 0;
+	}
 
 	SPDK_DEBUGLOG(bdev_nvme, "Registering admin poller for controller with poll period %" PRIu64 "\n", period);
 	nvme_ctrlr->adminq_timer_poller = SPDK_POLLER_REGISTER(bdev_nvme_poll_adminq, nvme_ctrlr,
