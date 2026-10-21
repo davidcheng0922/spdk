@@ -8451,11 +8451,12 @@ blobstore_clean_power_failure(void)
 }
 
 static void
-blob_delete_snapshot_power_failure(void)
+blob_delete_snapshot_power_failure_common(uint32_t recovery_qd)
 {
 	struct spdk_bs_dev *dev;
 	struct spdk_blob_store *bs;
 	struct spdk_blob_opts opts;
+	struct spdk_bs_opts bs_opts;
 	struct spdk_blob *blob, *snapshot;
 	struct spdk_power_failure_thresholds thresholds = {};
 	spdk_blob_id blobid, snapshotid;
@@ -8467,6 +8468,9 @@ blob_delete_snapshot_power_failure(void)
 	bool deleted = false;
 	int delete_snapshot_bserrno = -1;
 	uint32_t first_data_cluster;
+
+	spdk_bs_opts_init(&bs_opts, sizeof(bs_opts));
+	bs_opts.recovery_qd = recovery_qd;
 
 	thresholds.general_threshold = 1;
 	while (!deleted) {
@@ -8508,7 +8512,7 @@ blob_delete_snapshot_power_failure(void)
 		/* Do not shut down cleanly. Assumption is that after snapshot deletion
 		 * reports success, changes to both blobs should already persisted. */
 		dev_reset_power_failure_event();
-		ut_bs_dirty_load(&bs, NULL);
+		ut_bs_dirty_load(&bs, &bs_opts);
 		/* Snapshot crash recovery must account for each physical cluster only once. */
 		CU_ASSERT(spdk_bs_free_cluster_count(bs) == spdk_bit_pool_count_free(bs->used_clusters));
 
@@ -8567,11 +8571,24 @@ blob_delete_snapshot_power_failure(void)
 }
 
 static void
-blob_create_snapshot_power_failure(void)
+blob_delete_snapshot_power_failure(void)
+{
+	blob_delete_snapshot_power_failure_common(0);
+}
+
+static void
+blob_delete_snapshot_power_failure_batched_recovery(void)
+{
+	blob_delete_snapshot_power_failure_common(16);
+}
+
+static void
+blob_create_snapshot_power_failure_common(uint32_t recovery_qd)
 {
 	struct spdk_blob_store *bs = g_bs;
 	struct spdk_bs_dev *dev;
 	struct spdk_blob_opts opts;
+	struct spdk_bs_opts bs_opts;
 	struct spdk_blob *blob, *snapshot;
 	struct spdk_power_failure_thresholds thresholds = {};
 	spdk_blob_id blobid, snapshotid;
@@ -8583,6 +8600,9 @@ blob_create_snapshot_power_failure(void)
 	bool created = false;
 	int create_snapshot_bserrno = -1;
 	uint32_t first_data_cluster;
+
+	spdk_bs_opts_init(&bs_opts, sizeof(bs_opts));
+	bs_opts.recovery_qd = recovery_qd;
 
 	thresholds.general_threshold = 1;
 	while (!created) {
@@ -8621,7 +8641,7 @@ blob_create_snapshot_power_failure(void)
 		/* Do not shut down cleanly. Assumption is that after create snapshot
 		 * reports success, both blobs should be power-fail safe. */
 		dev_reset_power_failure_event();
-		ut_bs_dirty_load(&bs, NULL);
+		ut_bs_dirty_load(&bs, &bs_opts);
 		/* Snapshot crash recovery must account for each physical cluster only once. */
 		CU_ASSERT(spdk_bs_free_cluster_count(bs) == spdk_bit_pool_count_free(bs->used_clusters));
 
@@ -8677,6 +8697,18 @@ blob_create_snapshot_power_failure(void)
 
 		thresholds.general_threshold++;
 	}
+}
+
+static void
+blob_create_snapshot_power_failure(void)
+{
+	blob_create_snapshot_power_failure_common(0);
+}
+
+static void
+blob_create_snapshot_power_failure_batched_recovery(void)
+{
+	blob_create_snapshot_power_failure_common(16);
 }
 
 #define IO_UT_BLOCKS_PER_CLUSTER 64
@@ -12729,7 +12761,9 @@ main(int argc, char **argv)
 		CU_ADD_TEST(suite, blob_relations3);
 		CU_ADD_TEST(suite, blobstore_clean_power_failure);
 		CU_ADD_TEST(suite, blob_delete_snapshot_power_failure);
+		CU_ADD_TEST(suite, blob_delete_snapshot_power_failure_batched_recovery);
 		CU_ADD_TEST(suite, blob_create_snapshot_power_failure);
+		CU_ADD_TEST(suite, blob_create_snapshot_power_failure_batched_recovery);
 		CU_ADD_TEST(suite_bs, blob_inflate_rw);
 		CU_ADD_TEST(suite_bs, blob_inflate_unmap);
 		CU_ADD_TEST(suite_bs, blob_snapshot_freeze_io);
